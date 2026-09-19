@@ -154,3 +154,7 @@ repainting risk on the still-forming bar).
   (e.g. `OANDA:XAUUSD` vs `XAUUSD`), the exchange prefix before `:` is
   stripped automatically; adjust `app/models.py` if your broker needs
   further remapping.
+
+## Contributors
+
+- [Mohd Aamir](https://github.com/Aamir217)
