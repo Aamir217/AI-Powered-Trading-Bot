@@ -86,3 +86,71 @@ intentionally ships without live-trading code wired in.
 ```bash
 pytest
 ```
+
+---
+
+## BLACK-GOLD indicator auto-trader (`/webhook/strategy`)
+
+A second, deterministic endpoint for the custom `TIJARA TRADER BLACK GOLD`
+Pine indicator. Unlike `/webhook/tradingview` above, it does **not** ask
+Claude for a sanity check - it mechanically follows these rules:
+
+1. Buy `LOT_SIZE` lots instantly on the green dot (Long Signal).
+2. Sell `LOT_SIZE` lots instantly on the red dot (Short Signal).
+3. Close the open trade instantly on either black dot (Exit Long / Exit Short).
+4. Only one trade open at a time - new entry signals are ignored while a
+   trade is running.
+5. Close the trade the instant its floating profit reaches `TAKE_PROFIT_USD`
+   (checked every `TP_POLL_SECONDS` seconds by a background watcher).
+6. Once realized profit for the day reaches `DAILY_PROFIT_TARGET_USD`, no
+   more trades are opened until the next calendar day.
+
+### Broker connection
+
+`0.01` lot sizing means MetaTrader, so trades are placed via
+[MetaApi.cloud](https://metaapi.cloud/) (`app/metaapi_broker.py`), which
+connects to your existing MT4/MT5 broker account over the cloud - no need to
+keep a Windows terminal running. To set it up:
+
+1. Create a MetaApi.cloud account and add your MT4/MT5 account (**use a demo
+   account while testing this strategy**).
+2. Generate an API token and copy your MetaApi account id.
+3. Put them in `.env` as `METAAPI_TOKEN` and `METAAPI_ACCOUNT_ID`.
+4. Keep `DRY_RUN=true` until you've confirmed the logic behaves as expected
+   in the logs - it will log every buy/sell/close it *would* make without
+   placing real orders or requiring MetaApi credentials at all.
+5. Once you're ready to test on the demo account, set `DRY_RUN=false` and
+   restart the server.
+
+### TradingView alerts to create
+
+The indicator already defines four `alertcondition()`s. Create one
+TradingView alert per condition, each pointing at
+`https://<your-host>/webhook/strategy` with the JSON message shown:
+
+| Alert condition | Message JSON |
+|---|---|
+| Long Signal | `{"secret": "change-me", "action": "buy", "ticker": "{{ticker}}"}` |
+| Short Signal | `{"secret": "change-me", "action": "sell", "ticker": "{{ticker}}"}` |
+| Exit Long Signal | `{"secret": "change-me", "action": "close", "ticker": "{{ticker}}"}` |
+| Exit Short Signal | `{"secret": "change-me", "action": "close", "ticker": "{{ticker}}"}` |
+
+Replace `"secret"` with your `TRADINGVIEW_WEBHOOK_SECRET`. Set each alert's
+**Expiration** to "Open-ended" and trigger to "Once Per Bar Close" (or "Once
+Per Bar" if you want the fastest possible reaction, at the cost of
+repainting risk on the still-forming bar).
+
+### Notes / limitations
+
+- State (open position, daily profit) is kept in memory - it resets if the
+  server restarts. Fine for testing; for unattended live use you'd want to
+  persist it (e.g. to a small database) and reconcile against MetaApi on
+  startup.
+- The take-profit check polls every `TP_POLL_SECONDS` seconds rather than
+  setting a broker-side TP price, since $10 profit doesn't map to a fixed
+  price distance across instruments/lot sizes. Lower `TP_POLL_SECONDS` for
+  tighter reaction time at the cost of more API calls.
+- If your TradingView ticker format doesn't match your broker's symbol
+  (e.g. `OANDA:XAUUSD` vs `XAUUSD`), the exchange prefix before `:` is
+  stripped automatically; adjust `app/models.py` if your broker needs
+  further remapping.
